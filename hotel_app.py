@@ -19,14 +19,13 @@ with st.sidebar:
     
     stars_filter = st.multiselect(
         "Étoiles", ["5", "4", "3", "2", "1", "0"], 
-        default=["2", "3", "4", "5"]
+        default=["3", "4", "5"]
     )
     
     room_filter = st.selectbox("Type de chambre", ["Toutes", "Standard", "Double", "Suite", "Deluxe"])
     search_button = st.button("🚀 Lancer la recherche")
 
 # --- FONCTIONS API ---
-
 def get_destination_id(city):
     url = f"https://{RAPIDAPI_HOST}/api/v1/hotels/searchDestination"
     headers = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST}
@@ -53,7 +52,6 @@ def search_hotels(dest_id, s_type, arrival, departure):
     except: return {}
 
 # --- LOGIQUE D'AFFICHAGE ---
-
 if search_button:
     with st.spinner(f"Recherche à {city_name}..."):
         dest_id, s_type = get_destination_id(city_name)
@@ -66,30 +64,23 @@ if search_button:
                 final_data = []
                 for h in hotels_raw:
                     p = h.get('property', {})
-                    
-                    # 1. Étoiles
                     stars_val = p.get('propertyClass', 0)
                     stars_str = str(int(stars_val))
                     if stars_str not in stars_filter:
                         continue
                     
-                    # 2. Prix
                     price_info = p.get('priceBreakdown', {}).get('grossPrice', {})
                     price = price_info.get('value', 0)
                     if price == 0: continue
                     
-                    # 3. Chambre & Nom
-                    name = p.get('name', 'Hôtel')
                     room_info = p.get('wishlistName', 'Chambre') 
-
                     if room_filter != "Toutes" and room_filter.lower() not in room_info.lower():
                         continue
 
-                    # Construction de la ligne avec des noms de colonnes STRICTS
                     final_data.append({
-                        "Hôtel": name,
+                        "Hôtel": p.get('name', 'Hôtel'),
                         "Étoiles": f"{stars_str} ⭐",
-                        "Note": p.get('reviewScore', 'N/A'),
+                        "Note": round(p.get('reviewScore', 0), 1),
                         "Prix Booking (€)": float(price),
                         "Prix Expedia (€)": round(float(price) * 0.98, 2),
                         "Prix Direct (€)": round(float(price) * 0.95, 2)
@@ -99,23 +90,24 @@ if search_button:
                     df = pd.DataFrame(final_data)
                     st.success(f"✅ {len(df)} hôtels trouvés à {city_name}")
                     
-                    # Colonnes sur lesquelles appliquer la couleur et le format
+                    # 1. TRI DU MOINS CHER AU PLUS CHER
+                    df = df.sort_values(by="Prix Booking (€)", ascending=True)
+                    
                     cols_prix = ["Prix Booking (€)", "Prix Expedia (€)", "Prix Direct (€)"]
 
-                    # Fonction pour colorer le min
-                    def highlight_min(s):
+                    # 2. FONCTION DE STYLE (Écriture verte pour le min)
+                    def highlight_min_text(s):
                         is_min = s == s.min()
-                        return ['background-color: #d4edda' if v else '' for v in is_min]
+                        return ['color: #28a745; font-weight: bold;' if v else '' for v in is_min]
 
-                    # Affichage final
+                    # Affichage
                     st.dataframe(
-                        df.sort_values("Prix Booking (€)")
-                        .style.apply(highlight_min, axis=1, subset=cols_prix)
+                        df.style.apply(highlight_min_text, axis=1, subset=cols_prix)
                         .format({c: "{:.2f}" for c in cols_prix}),
                         use_container_width=True
                     )
                 else:
-                    st.warning("Aucun hôtel trouvé avec vos filtres d'étoiles/chambres.")
+                    st.warning("Aucun hôtel trouvé avec vos filtres.")
             else:
                 st.error("L'API n'a pas renvoyé de liste d'hôtels.")
         else:
