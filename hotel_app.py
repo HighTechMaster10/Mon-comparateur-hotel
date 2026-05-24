@@ -17,13 +17,13 @@ with st.sidebar:
     checkin = st.date_input("Arrivée", date.today() + timedelta(days=7))
     checkout = st.date_input("Départ", date.today() + timedelta(days=8))
     
+    # On ajoute "0" pour les établissements sans étoiles officielles
     stars_filter = st.multiselect(
         "Étoiles", ["5", "4", "3", "2", "1", "0"], 
-        default=["1", "2", "3", "4", "5", "0"]
+        default=["2", "3", "4", "5"]
     )
-    room_filter = st.selectbox("Type de chambre", ["Toutes", "Standard", "Double", "Suite", "Deluxe"])
     
-    debug_mode = st.checkbox("Afficher les données brutes (Debug)")
+    room_filter = st.selectbox("Type de chambre", ["Toutes", "Standard", "Double", "Suite", "Deluxe"])
     search_button = st.button("🚀 Lancer la recherche")
 
 # --- FONCTIONS API ---
@@ -46,71 +46,78 @@ def search_hotels(dest_id, s_type, arrival, departure):
         "dest_id": dest_id, "search_type": s_type,
         "arrival_date": str(arrival), "departure_date": str(departure),
         "adults": "1", "room_qty": "1", "page_number": "1",
-        "units": "metric", "languagecode": "fr", "currency_code": "EUR"
+        "languagecode": "fr", "currency_code": "EUR"
     }
     try:
         response = requests.get(url, headers=headers, params=querystring)
         return response.json()
     except: return {}
 
-# --- EXÉCUTION ---
+# --- LOGIQUE D'AFFICHAGE ---
 
 if search_button:
-    with st.spinner("Recherche en cours..."):
+    with st.spinner(f"Recherche à {city_name}..."):
         dest_id, s_type = get_destination_id(city_name)
         
         if dest_id:
-            full_response = search_hotels(dest_id, s_type, checkin, checkout)
-            hotels_raw = full_response.get('data', {}).get('hotels', [])
-
-            # DEBUG : Affiche ce que l'API renvoie vraiment si on ne trouve rien
-            if debug_mode or not hotels_raw:
-                with st.expander("🔍 Analyse des données reçues (Debug)"):
-                    st.write(full_response)
+            res = search_hotels(dest_id, s_type, checkin, checkout)
+            hotels_raw = res.get('data', {}).get('hotels', [])
 
             if hotels_raw:
-                final_list = []
+                final_data = []
                 for h in hotels_raw:
-                    # On essaie plusieurs chemins pour trouver les infos (plus robuste)
-                    prop = h.get('property', h) # Parfois c'est à la racine
+                    # On entre dans l'objet 'property' comme vu dans le debug
+                    p = h.get('property', {})
                     
-                    # 1. Étoiles (parfois propertyClass, parfois class)
-                    stars_val = prop.get('propertyClass', prop.get('class', 0))
-                    try: stars = str(int(float(stars_val)))
-                    except: stars = "0"
+                    # 1. Extraction des Étoiles
+                    stars_val = p.get('propertyClass', 0)
+                    stars_str = str(int(stars_val))
                     
-                    if stars not in stars_filter:
+                    if stars_str not in stars_filter:
                         continue
                     
-                    # 2. Prix (on teste plusieurs emplacements courants)
-                    price_bd = h.get('priceBreakdown', {})
-                    price = price_bd.get('grossPrice', {}).get('value', 
-                            price_bd.get('allInclusivePrice', {}).get('value', 
-                            h.get('min_total_price', 0)))
+                    # 2. Extraction du Prix (Caché dans property -> priceBreakdown -> grossPrice)
+                    price_info = p.get('priceBreakdown', {}).get('grossPrice', {})
+                    price = price_info.get('value', 0)
                     
                     if price == 0: continue
                     
-                    # 3. Chambre
-                    room_name = prop.get('wishlistName', h.get('hotel_name', 'Chambre'))
-                    if room_filter != "Toutes" and room_filter.lower() not in room_name.lower():
+                    # 3. Nom de l'hôtel et Chambre
+                    name = p.get('name', 'Hôtel')
+                    # Le type de chambre n'est pas toujours clair, on utilise wishlistName ou accessibilityLabel
+                    room_info = p.get('wishlistName', 'Chambre') 
+
+                    if room_filter != "Toutes" and room_filter.lower() not in room_info.lower():
                         continue
 
-                    final_list.append({
-                        "Hôtel": prop.get('name', h.get('hotel_name')),
-                        "Étoiles": f"{stars} ⭐",
-                        "Chambre": room_name,
-                        "Prix Booking (€)": float(price),
-                        "Expedia (Est.)": round(float(price) * 0.98, 2),
-                        "Direct (Est.)": round(float(price) * 0.95, 2)
+                    final_data.append({
+                        "Hôtel": name,
+                        "Étoiles": f"{stars_str} ⭐",
+                        "Prix Booking (€)": round(float(price), 2),
+                        "Note": p.get('reviewScore', 'N/A'),
+                        "Ville": p.get('wishlistName', city_name),
+                        "Expedia (Simulé)": round(float(price) * 0.98, 2),
+                        "Direct (Simulé)": round(float(price) * 0.95, 2)
                     })
 
-                if final_list:
-                    df = pd.DataFrame(final_list)
+                if final_data:
+                    df = pd.DataFrame(final_data)
                     st.success(f"✅ {len(df)} hôtels trouvés")
-                    st.dataframe(df.sort_values("Prix Booking (€)"), use_container_width=True)
+                    
+                    # Style du tableau (Surligne le moins cher)
+                    def highlight_min(s):
+                        is_min = s == s.min()
+                        return ['background-color: #d4edda' if v else '' for v in is_min]
+
+                    st.dataframe(
+                        df.sort_values("Prix Booking (€)")
+                        .style.apply(highlight_min, axis=1, subset=["Prix Booking (€)", "Expedia (Est.)", "Direct (Est.)"], ignore_index=True)
+                        .format({"Prix Booking (€)": "{:.2f}", "Expedia (Est.)": "{:.2f}", "Direct (Est.)": "{:.2f}"}),
+                        use_container_width=True
+                    )
                 else:
-                    st.warning("Aucun hôtel ne correspond à vos filtres après analyse.")
+                    st.warning("Aucun hôtel trouvé avec vos filtres d'étoiles/chambres.")
             else:
-                st.error("L'API n'a renvoyé aucun hôtel pour ces dates.")
+                st.error("L'API n'a pas renvoyé de liste d'hôtels.")
         else:
             st.error("Ville non trouvée.")
