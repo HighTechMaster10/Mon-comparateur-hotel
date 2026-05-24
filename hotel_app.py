@@ -2,14 +2,13 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import date, timedelta
-import io
 
 # --- CONFIGURATION ---
 RAPIDAPI_KEY = "fe0bf05c0fmsha6fe53849a0d181p17e53ejsn37cc55974c16"
 RAPIDAPI_HOST = "booking-com15.p.rapidapi.com"
 
 st.set_page_config(page_title="Comparateur Expert", layout="wide")
-st.title("🏨 Comparateur d'Hôtels avec Export & Détails")
+st.title("🏨 Comparateur d'Hôtels")
 
 # --- BARRE LATÉRALE ---
 with st.sidebar:
@@ -47,15 +46,15 @@ def search_hotels(dest_id, s_type, arrival, departure):
         return response.json()
     except: return {}
 
-# --- LOGIQUE PRINCIPALE ---
-if search_button:
-    with st.spinner("Recherche en cours..."):
-        dest_id, s_type = get_destination_id(city_name)
-        if dest_id:
-            res = search_hotels(dest_id, s_type, checkin, checkout)
-            hotels_raw = res.get('data', {}).get('hotels', [])
-
-            if hotels_raw:
+# --- LOGIQUE D'AFFICHAGE ---
+if search_button or 'last_results' in st.session_state:
+    if search_button:
+        with st.spinner("Recherche des offres..."):
+            dest_id, s_type = get_destination_id(city_name)
+            if dest_id:
+                res = search_hotels(dest_id, s_type, checkin, checkout)
+                hotels_raw = res.get('data', {}).get('hotels', [])
+                
                 final_data = []
                 for h in hotels_raw:
                     p = h.get('property', {})
@@ -76,62 +75,51 @@ if search_button:
                         "Prix Expedia (€)": round(float(price) * 0.98, 2),
                         "Prix Direct (€)": round(float(price) * 0.95, 2)
                     })
-
-                if final_data:
-                    df = pd.DataFrame(final_data).sort_values("Prix Booking (€)")
-                    
-                    # --- AFFICHAGE DU TABLEAU AVEC SÉLECTION ---
-                    st.subheader(f"✅ {len(df)} hôtels trouvés (Sélectionnez une ligne pour le détail)")
-                    
-                    # On utilise st.dataframe avec la sélection activée
-                    event = st.dataframe(
-                        df.style.apply(lambda s: ['color: #28a745; font-weight: bold;' if v == s.min() else '' for v in s], 
-                                      axis=1, subset=["Prix Booking (€)", "Prix Expedia (€)", "Prix Direct (€)"])
-                        .format({"Prix Booking (€)": "{:.2f}", "Prix Expedia (€)": "{:.2f}", "Prix Direct (€)": "{:.2f}"}),
-                        use_container_width=True,
-                        on_select="rerun",
-                        selection_mode="single_row"
-                    )
-
-                    # --- EXPORT EXCEL/CSV ---
-                    csv = df.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(
-                        label="📥 Exporter les résultats pour Excel / Google Sheets",
-                        data=csv,
-                        file_name=f"comparatif_hotels_{city_name}.csv",
-                        mime="text/csv",
-                    )
-
-                    # --- DÉTAIL PAR JOUR (SI UNE LIGNE EST SÉLECTIONNÉE) ---
-                    selected_rows = event.get("selection", {}).get("rows", [])
-                    if selected_rows:
-                        idx = selected_rows[0]
-                        hotel_sel = df.iloc[idx]
-                        nb_nuits = (checkout - checkin).days
-                        
-                        st.divider()
-                        st.subheader(f"📅 Détail du séjour : {hotel_sel['Hôtel']}")
-                        
-                        if nb_nuits > 0:
-                            # Création du tableau journalier
-                            daily_list = []
-                            prix_moyen = hotel_sel['Prix Booking (€)'] / nb_nuits
-                            
-                            for i in range(nb_nuits):
-                                jour = checkin + timedelta(days=i)
-                                daily_list.append({
-                                    "Date": jour.strftime("%d/%m/%Y"),
-                                    "Prix Estimé Nuitée (€)": round(prix_moyen, 2)
-                                })
-                            
-                            df_daily = pd.DataFrame(daily_list)
-                            st.table(df_daily) # Affichage sous forme de table fixe
-                            st.write(f"**Total pour {nb_nuits} nuits : {hotel_sel['Prix Booking (€)']} €**")
-                        else:
-                            st.info("Séjour d'une seule journée.")
-                else:
-                    st.warning("Aucun hôtel trouvé avec vos filtres.")
+                st.session_state.last_results = pd.DataFrame(final_data).sort_values("Prix Booking (€)")
             else:
-                st.error("Aucun résultat de l'API.")
-        else:
-            st.error("Ville non trouvée.")
+                st.error("Ville non trouvée.")
+
+    if 'last_results' in st.session_state and not st.session_state.last_results.empty:
+        df = st.session_state.last_results
+        
+        st.subheader("✅ Résultats (Sélectionnez une ligne pour voir le détail par jour)")
+        
+        # Style : texte vert pour le minimum
+        def color_min_green(s):
+            is_min = s == s.min()
+            return ['color: #28a745; font-weight: bold;' if v else '' for v in is_min]
+
+        # Tableau interactif
+        event = st.dataframe(
+            df.style.apply(color_min_green, axis=1, subset=["Prix Booking (€)", "Prix Expedia (€)", "Prix Direct (€)"])
+            .format({"Prix Booking (€)": "{:.2f}", "Prix Expedia (€)": "{:.2f}", "Prix Direct (€)": "{:.2f}"}),
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="single_row",
+            hide_index=True
+        )
+
+        # Export Excel
+        csv = df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Télécharger pour Excel / Google Sheets", data=csv, file_name="hotels.csv", mime="text/csv")
+
+        # Détail quotidien
+        selected_indices = event.selection.rows
+        if selected_indices:
+            hotel_sel = df.iloc[selected_indices[0]]
+            nb_nuits = (checkout - checkin).days
+            
+            st.divider()
+            st.markdown(f"### 📅 Détail quotidien pour : **{hotel_sel['Hôtel']}**")
+            
+            if nb_nuits > 0:
+                daily_prices = []
+                avg_price = hotel_sel['Prix Booking (€)'] / nb_nuits
+                for i in range(nb_nuits):
+                    date_nuit = checkin + timedelta(days=i)
+                    daily_prices.append({"Date": date_nuit.strftime("%d/%m/%Y"), "Prix (€)": round(avg_price, 2)})
+                
+                st.table(pd.DataFrame(daily_prices))
+                st.info(f"Total séjour : {hotel_sel['Prix Booking (€)']} € pour {nb_nuits} nuit(s).")
+            else:
+                st.write("Séjour d'une seule journée.")
