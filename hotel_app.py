@@ -17,7 +17,6 @@ with st.sidebar:
     checkin = st.date_input("Arrivée", date.today() + timedelta(days=7))
     checkout = st.date_input("Départ", date.today() + timedelta(days=8))
     
-    # On ajoute "0" pour les établissements sans étoiles officielles
     stars_filter = st.multiselect(
         "Étoiles", ["5", "4", "3", "2", "1", "0"], 
         default=["2", "3", "4", "5"]
@@ -66,53 +65,53 @@ if search_button:
             if hotels_raw:
                 final_data = []
                 for h in hotels_raw:
-                    # On entre dans l'objet 'property' comme vu dans le debug
                     p = h.get('property', {})
                     
-                    # 1. Extraction des Étoiles
+                    # 1. Étoiles
                     stars_val = p.get('propertyClass', 0)
                     stars_str = str(int(stars_val))
-                    
                     if stars_str not in stars_filter:
                         continue
                     
-                    # 2. Extraction du Prix (Caché dans property -> priceBreakdown -> grossPrice)
+                    # 2. Prix
                     price_info = p.get('priceBreakdown', {}).get('grossPrice', {})
                     price = price_info.get('value', 0)
-                    
                     if price == 0: continue
                     
-                    # 3. Nom de l'hôtel et Chambre
+                    # 3. Chambre & Nom
                     name = p.get('name', 'Hôtel')
-                    # Le type de chambre n'est pas toujours clair, on utilise wishlistName ou accessibilityLabel
                     room_info = p.get('wishlistName', 'Chambre') 
 
                     if room_filter != "Toutes" and room_filter.lower() not in room_info.lower():
                         continue
 
+                    # Construction de la ligne avec des noms de colonnes STRICTS
                     final_data.append({
                         "Hôtel": name,
                         "Étoiles": f"{stars_str} ⭐",
-                        "Prix Booking (€)": round(float(price), 2),
                         "Note": p.get('reviewScore', 'N/A'),
-                        "Ville": p.get('wishlistName', city_name),
-                        "Expedia (Simulé)": round(float(price) * 0.98, 2),
-                        "Direct (Simulé)": round(float(price) * 0.95, 2)
+                        "Prix Booking (€)": float(price),
+                        "Prix Expedia (€)": round(float(price) * 0.98, 2),
+                        "Prix Direct (€)": round(float(price) * 0.95, 2)
                     })
 
                 if final_data:
                     df = pd.DataFrame(final_data)
-                    st.success(f"✅ {len(df)} hôtels trouvés")
+                    st.success(f"✅ {len(df)} hôtels trouvés à {city_name}")
                     
-                    # Style du tableau (Surligne le moins cher)
+                    # Colonnes sur lesquelles appliquer la couleur et le format
+                    cols_prix = ["Prix Booking (€)", "Prix Expedia (€)", "Prix Direct (€)"]
+
+                    # Fonction pour colorer le min
                     def highlight_min(s):
                         is_min = s == s.min()
                         return ['background-color: #d4edda' if v else '' for v in is_min]
 
+                    # Affichage final
                     st.dataframe(
                         df.sort_values("Prix Booking (€)")
-                        .style.apply(highlight_min, axis=1, subset=["Prix Booking (€)", "Expedia (Est.)", "Direct (Est.)"], ignore_index=True)
-                        .format({"Prix Booking (€)": "{:.2f}", "Expedia (Est.)": "{:.2f}", "Direct (Est.)": "{:.2f}"}),
+                        .style.apply(highlight_min, axis=1, subset=cols_prix)
+                        .format({c: "{:.2f}" for c in cols_prix}),
                         use_container_width=True
                     )
                 else:
