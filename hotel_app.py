@@ -3,43 +3,30 @@ import pandas as pd
 import requests
 from datetime import date, timedelta
 
-# --- CONFIGURATION DES ACCÈS ---
+# --- CONFIGURATION ---
 RAPIDAPI_KEY = "fe0bf05c0fmsha6fe53849a0d181p17e53ejsn37cc55974c16"
 RAPIDAPI_HOST = "booking-com15.p.rapidapi.com"
 
-st.set_page_config(page_title="Comparateur d'Hôtels Pro", layout="wide")
+st.set_page_config(page_title="Debug Comparateur", layout="wide")
 
-st.title("🏨 Comparateur de Prix d'Hôtels (Données Temps Réel)")
-st.markdown("Recherche sur **Booking.com** avec analyse comparative.")
+st.title("🏨 Comparateur d'Hôtels")
 
 # --- BARRE LATÉRALE ---
 with st.sidebar:
-    st.header("🔍 Critères de recherche")
-    city_name = st.text_input("Ville de destination", "Paris")
+    st.header("🔍 Critères")
+    city_name = st.text_input("Ville", "Paris")
+    checkin = st.date_input("Arrivée", date.today() + timedelta(days=7))
+    checkout = st.date_input("Départ", date.today() + timedelta(days=10))
     
-    col1, col2 = st.columns(2)
-    with col1:
-        checkin = st.date_input("Date d'arrivée", date.today() + timedelta(days=7))
-    with col2:
-        checkout = st.date_input("Date de départ", date.today() + timedelta(days=10))
+    stars_filter = st.multiselect("Étoiles", ["5", "4", "3", "2"], default=["4", "5"])
+    room_filter = st.selectbox("Chambre", ["Toutes", "Standard", "Double", "Suite", "Deluxe"])
     
-    stars_filter = st.multiselect(
-        "Catégorie d'hôtel",
-        options=["5", "4", "3", "2"],
-        default=["4", "5"]
-    )
-    
-    room_filter = st.selectbox(
-        "Type de chambre préféré",
-        ["Toutes", "Standard", "Double", "Suite", "Deluxe", "Famille"]
-    )
-
     search_button = st.button("🚀 Lancer la recherche")
 
-# --- FONCTIONS API (CORRIGÉES POUR BOOKING-COM15) ---
+# --- FONCTIONS TECHNIQUES ---
 
 def get_destination_id(city):
-    """Trouve l'ID unique de la ville (Ajout de /api/)"""
+    # On teste d'abord l'URL avec /api/, si ça échoue on pourra voir pourquoi
     url = f"https://{RAPIDAPI_HOST}/api/v1/hotels/searchDestination"
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
@@ -50,15 +37,24 @@ def get_destination_id(city):
     try:
         response = requests.get(url, headers=headers, params=querystring)
         data = response.json()
-        # Correction : on vérifie la structure spécifique de booking-com15
-        if data.get('status') == True and data.get('data'):
+        
+        # DEBUG : Affiche la réponse en cas de problème
+        if response.status_code != 200:
+            st.error(f"Erreur API ({response.status_code}): {data.get('message', 'Erreur inconnue')}")
+            return None, None
+            
+        if data.get('data'):
+            # On prend le premier résultat
             return data['data'][0]['dest_id'], data['data'][0]['search_type']
+        else:
+            st.warning(f"L'API n'a trouvé aucune destination pour '{city}'. Essayez un nom plus simple.")
+            return None, None
+            
     except Exception as e:
-        st.error(f"Erreur technique (Destination) : {e}")
-    return None, None
+        st.error(f"Erreur de connexion : {e}")
+        return None, None
 
 def search_hotels(dest_id, search_type, arrival, departure):
-    """Récupère les hôtels et leurs prix (Ajout de /api/)"""
     url = f"https://{RAPIDAPI_HOST}/api/v1/hotels/searchHotels"
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
@@ -69,85 +65,61 @@ def search_hotels(dest_id, search_type, arrival, departure):
         "search_type": search_type,
         "arrival_date": str(arrival),
         "departure_date": str(departure),
-        "adults": "1",
-        "room_qty": "1",
-        "page_number": "1",
-        "units": "metric",
-        "languagecode": "fr",
-        "currency_code": "EUR"
+        "adults": "1", "room_qty": "1", "page_number": "1",
+        "units": "metric", "languagecode": "fr", "currency_code": "EUR"
     }
     
     try:
         response = requests.get(url, headers=headers, params=querystring)
         data = response.json()
-        if data.get('status') == True:
-            return data.get('data', {}).get('hotels', [])
-    except Exception as e:
-        st.error(f"Erreur technique (Hôtels) : {e}")
-    return []
+        return data.get('data', {}).get('hotels', [])
+    except:
+        return []
 
-# --- TRAITEMENT ---
+# --- EXÉCUTION ---
 
 if search_button:
-    if checkin >= checkout:
-        st.error("Erreur : La date de départ doit être après l'arrivée.")
-    else:
-        with st.spinner(f"Recherche en cours pour {city_name}..."):
-            dest_id, search_type = get_destination_id(city_name)
+    with st.spinner(f"Recherche en cours..."):
+        # 1. On cherche l'ID de la ville
+        dest_id, s_type = get_destination_id(city_name)
+        
+        if dest_id:
+            # 2. On cherche les hôtels
+            hotels_raw = search_hotels(dest_id, s_type, checkin, checkout)
             
-            if dest_id:
-                hotels_raw = search_hotels(dest_id, search_type, checkin, checkout)
-                
-                if hotels_raw:
-                    processed_data = []
-                    for h in hotels_raw:
-                        # 1. Filtre Étoiles
-                        hotel_stars = str(h.get('property', {}).get('propertyClass', '0'))
-                        if hotel_stars not in stars_filter:
-                            continue
-                        
-                        # 2. Récupération du prix (Structure spécifique booking-com15)
-                        price_data = h.get('priceBreakdown', {}).get('grossPrice', {})
-                        total_price = price_data.get('value', 0)
-                        
-                        if total_price == 0: continue
+            if hotels_raw:
+                processed = []
+                for h in hotels_raw:
+                    # Extraction sécurisée des données
+                    prop = h.get('property', {})
+                    hotel_stars = str(prop.get('propertyClass', '0'))
+                    
+                    if hotel_stars not in stars_filter:
+                        continue
+                    
+                    price = h.get('priceBreakdown', {}).get('grossPrice', {}).get('value', 0)
+                    if price == 0: continue
+                    
+                    name = prop.get('name', 'Hôtel')
+                    room = prop.get('wishlistName', 'Chambre Standard')
+                    
+                    if room_filter != "Toutes" and room_filter.lower() not in room.lower():
+                        continue
 
-                        # 3. Filtre Chambre
-                        hotel_name = h.get('property', {}).get('name', 'Hôtel')
-                        # Note: booking-com15 met parfois le nom de chambre dans wishlistName ou ailleurs
-                        room_name = h.get('property', {}).get('wishlistName', 'Chambre Standard')
+                    processed.append({
+                        "Hôtel": name,
+                        "Étoiles": f"{hotel_stars} ⭐",
+                        "Chambre": room,
+                        "Prix Booking (€)": price,
+                        "Expedia (Simulé)": round(price * 0.98, 2),
+                        "Direct (Simulé)": round(price * 0.95, 2)
+                    })
 
-                        if room_filter != "Toutes" and room_filter.lower() not in room_name.lower():
-                            continue
-
-                        processed_data.append({
-                            "Hôtel": hotel_name,
-                            "Étoiles": f"{hotel_stars} ⭐",
-                            "Type de Chambre": room_name,
-                            "Note": h.get('property', {}).get('reviewScore', 'N/A'),
-                            "Prix Booking (€)": total_price,
-                            "Estimation Expedia (€)": round(total_price * 0.98, 2),
-                            "Estimation Directe (€)": round(total_price * 0.96, 2)
-                        })
-
-                    if processed_data:
-                        df = pd.DataFrame(processed_data)
-                        st.success(f"✅ {len(df)} établissements trouvés.")
-                        
-                        # Style du tableau
-                        def highlight_min(s):
-                            is_min = s == s.min()
-                            return ['background-color: #d4edda' if v else '' for v in is_min]
-
-                        st.dataframe(
-                            df.sort_values("Prix Booking (€)")
-                            .style.apply(highlight_min, axis=1, subset=["Prix Booking (€)", "Estimation Expedia (€)", "Estimation Directe (€)"])
-                            .format({"Prix Booking (€)": "{:.2f}", "Estimation Expedia (€)": "{:.2f}", "Estimation Directe (€)": "{:.2f}"}),
-                            use_container_width=True
-                        )
-                    else:
-                        st.warning("Aucun hôtel ne correspond à vos filtres d'étoiles ou de chambre.")
+                if processed:
+                    df = pd.DataFrame(processed)
+                    st.success(f"{len(df)} hôtels trouvés à {city_name}")
+                    st.dataframe(df.sort_values("Prix Booking (€)"), use_container_width=True)
                 else:
-                    st.error("Aucun hôtel trouvé pour ces dates.")
+                    st.warning("Aucun hôtel ne correspond à vos filtres (étoiles/chambre).")
             else:
-                st.error("Ville non trouvée. Essayez un nom simple (ex: 'Paris' au lieu de 'Paris, France').")
+                st.error("Aucun hôtel trouvé pour ces dates.")
