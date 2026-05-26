@@ -8,7 +8,7 @@ import io
 SERPAPI_KEY = "c1b04560d953ef47f4909bdfbf369fae31a23eea80d7aa2b5916a38eefa0a7f2"
 CITY_NAME = "Toulon 83000, France"
 
-# Liste stricte des hôtels cibles (sans les étoiles pour faciliter la correspondance textuelle)
+# Ta liste exacte des noms d'hôtels renvoyés par l'API
 HOTELS_CIBLES = [
     "Grand Hôtel Dauphiné Toulon - Boutique Hotel & Suites",
     "Grand Hôtel de la Gare Toulon - Boutique Hôtel",
@@ -24,7 +24,7 @@ HOTELS_CIBLES = [
 ]
 
 st.set_page_config(page_title="Grille Tarifaire Hôtels - Toulon", layout="wide")
-st.title("📊 Grille Comparative Ciblée - Toulon")
+st.title("📊 Grille Comparative Ciblée - Toulon (83000)")
 
 # --- BARRE LATÉRALE ---
 with st.sidebar:
@@ -67,10 +67,11 @@ if search_button:
     elif nb_nuits > 10:
         st.warning("⚠️ Limite de 10 jours maximum pour préserver votre quota d'appels API.")
     else:
-        # Initialisation de la grille uniquement avec les hôtels de la liste
-        # Chaque hôtel de la liste est configuré à 0 pour toutes les dates par défaut
+        # Création des en-têtes de colonnes (Dates)
         liste_dates = [(checkin + timedelta(days=i)).strftime("%d/%m (%a)") for i in range(nb_nuits)]
-        grid_data = {f"{name}": {d: 0 for d in liste_dates} for name in HOTELS_CIBLES}
+        
+        # Initialisation de la grille : tous tes hôtels cibles commencent avec un prix à 0 pour chaque jour
+        grid_data = {name: {d: 0.0 for d in liste_dates} for name in HOTELS_CIBLES}
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -86,44 +87,39 @@ if search_button:
             hotels_day = fetch_hotel_prices_for_day(current_date)
             
             for h in hotels_day:
-                api_hotel_name = h.get('name', '')
-                stars = str(h.get('class', 0))
+                api_hotel_name = h.get('name', '').strip()
                 price = h.get('rate_per_night', {}).get('extracted_lowest')
                 
-                # Vérification si l'hôtel de l'API correspond à un hôtel de notre liste cible
+                # Double vérification flexible pour faire matcher l'hôtel de l'API avec ta liste
                 matched_name = None
                 for cible in HOTELS_CIBLES:
-                    # Comparaison flexible (insensible à la casse et partielle pour gérer "Ibis Styles" vs "Ibis style")
-                    if cible.lower() in api_hotel_name.lower():
+                    c_low = cible.lower().strip()
+                    a_low = api_hotel_name.lower().strip()
+                    
+                    if c_low in a_low or a_low in c_low:
                         matched_name = cible
                         break
                 
-                # Si l'hôtel est dans notre liste et qu'un prix existe, on l'ajoute
+                # Si correspondance trouvée et qu'un prix existe, on l'applique
                 if matched_name and price:
-                    # On renomme proprement l'affichage avec l'étoile de l'API pour info
-                    display_name = f"{matched_name} ({stars}⭐)"
-                    
-                    # Si c'est le premier prix trouvé pour cet hôtel, on transfère les données de la clé d'origine
-                    if matched_name in grid_data:
-                        grid_data[display_name] = grid_data.pop(matched_name)
-                        
-                    grid_data[display_name][date_label] = float(price)
+                    grid_data[matched_name][date_label] = float(price)
 
         status_text.empty()
         progress_bar.empty()
 
         if grid_data:
-            # Transformation en DataFrame
+            # Conversion en DataFrame Pandas
             df_grid = pd.DataFrame.from_dict(grid_data, orient='index')
             
-            # Réorganisation stricte des colonnes
+            # Forcer l'ordre chronologique des colonnes
             df_grid = df_grid[liste_dates]
             
-            st.success(f"✅ Comparatif généré avec succès pour ta sélection d'hôtels.")
+            st.success(f"✅ Comparatif généré avec succès pour tes {len(df_grid)} hôtels cibles.")
 
             # --- AFFICHAGE DE LA GRILLE ---
-            st.write("### 📅 Prix par nuitée (0 = Non disponible / Pas dans les résultats)")
+            st.write("### 📅 Prix par nuitée (0.00 € = Complet ou non trouvé)")
             
+            # Fonction de coloration du prix le plus bas de la journée (en excluant les 0)
             def highlight_min_valid(s):
                 valid_prices = s[s > 0]
                 if not valid_prices.empty:
@@ -143,10 +139,10 @@ if search_button:
                 df_grid.to_excel(writer, sheet_name='Grille Toulon Ciblée')
             
             st.download_button(
-                label="📥 Télécharger la grille ciblée (Excel)",
+                label="📥 Télécharger la grille ciblée en format Excel",
                 data=buffer.getvalue(),
-                file_name=f"grille_hotels_cibles_toulon.xlsx",
+                file_name=f"grille_hotels_toulon_{checkin}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Aucun des hôtels de la liste n'a renvoyé de tarifs.")
+            st.warning("Aucune donnée n'a pu être extraite. Vérifie ton quota SerpApi.")
