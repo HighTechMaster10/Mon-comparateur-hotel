@@ -26,6 +26,10 @@ HOTELS_CIBLES = [
 st.set_page_config(page_title="Grille Tarifaire Hôtels - Toulon", layout="wide")
 st.title("📊 Grille Comparative Ciblée - Toulon (83000)")
 
+# --- SIGNATURE AJOUTÉE ICI ---
+st.markdown("*Application réalisée par Christophe ARNAUD, (droits réservés)*")
+st.write("---") # Petite ligne de séparation visuelle
+
 # --- BARRE LATÉRALE ---
 with st.sidebar:
     st.header("🔍 Paramètres")
