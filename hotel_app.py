@@ -24,11 +24,26 @@ HOTELS_CIBLES = [
 ]
 
 st.set_page_config(page_title="Grille Tarifaire Hôtels - Toulon", layout="wide")
+
+# --- MASQUER LE COMPTE, LE BOUTON DE DEPLOIEMENT ET LE MENU DEVELOPPEUR ---
+st.markdown(
+    """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display:none;}
+    [data-testid="stStatusWidget"] {visibility: hidden;}
+    [data-testid="stDecoration"] {display:none;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("📊 Grille Comparative Ciblée - Toulon (83000)")
 
-# --- SIGNATURE AJOUTÉE ICI ---
+# --- SIGNATURE ---
 st.markdown("*Application réalisée par Christophe ARNAUD, (droits réservés)*")
-st.write("---") # Petite ligne de séparation visuelle
+st.write("---") 
 
 # --- BARRE LATÉRALE ---
 with st.sidebar:
