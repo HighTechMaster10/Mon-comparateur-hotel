@@ -3,12 +3,13 @@ import pandas as pd
 import requests
 from datetime import date, timedelta
 import io
-import os  # Dépendance ajoutée pour lire les variables d'environnement
+import os  # Pour lire les variables d'environnement
 
 # --- CONFIGURATION SÉCURISÉE ---
-# Le code va chercher la clé 'SERPAPI_KEY' enregistrée dans Windows.
-# Si elle n'est pas trouvée, il prend une valeur vide par défaut.
-SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+# 1) En priorité : clé stockée dans les secrets Streamlit (Cloud)
+# 2) Sinon : variable d'environnement Windows SERPAPI_KEY
+SERPAPI_KEY = st.secrets.get("SERPAPI_KEY", os.environ.get("SERPAPI_KEY", ""))
+
 CITY_NAME = "Toulon 83000, France"
 
 # Ta liste exacte des noms d'hôtels renvoyés par l'API
@@ -82,9 +83,13 @@ def fetch_hotel_prices_for_day(single_date):
 
 # --- LOGIQUE DE CALCUL DE LA GRILLE ---
 if search_button:
-    # Double vérification pour bloquer le script si la variable d'environnement est vide
+    # Double vérification pour bloquer le script si la clé est vide
     if not SERPAPI_KEY:
-        st.error("❌ Clé API introuvable. Veuillez configurer la variable d'environnement SERPAPI_KEY sur votre système Windows.")
+        st.error(
+            "❌ Clé API introuvable.\n\n"
+            "- Sur Streamlit Cloud : ajoute SERPAPI_KEY dans *Settings → Secrets*.\n"
+            "- En local Windows : crée la variable d'environnement SERPAPI_KEY."
+        )
     else:
         nb_nuits = (checkout - checkin).days
         
